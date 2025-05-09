@@ -1,22 +1,76 @@
+use tonic::{transport::Server, Request, Response, Status};
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
+use tokio::sync::mpsc::{Receiver, Sender};
+
+use services::payment_service_server::{PaymentService, PaymentServiceServer};
+use services::{ChatMessage, PaymentRequest, PaymentResponse};
+
+use services::transaction_service_server::{TransactionService, TransactionServiceServer};
+use services::{TransactionRequest, TransactionResponse};
+
+use services::chat_service_server::{ChatService, ChatServiceServer};
+
+
 pub mod services {
     tonic::include_proto!("services");
 }
 
-use services::{payment_service_client::PaymentServiceClient, PaymentRequest,
-    transaction_service_client::TransactionServiceClient, TransactionRequest,
-    chat_service_client::ChatServiceClient, ChatMessage,
-};
+#[derive(Default)]
+pub struct MyPaymentService {}
+
+#[tonic::async_trait]
+impl TransactionService for MyTransactionService {
+    type GetTransactionHistoryStream = ReceiverStream<Result<TransactionResponse, Status>>;
+
+    async fn get_transaction_history(
+        &self,
+        request: Request<TransactionRequest>,
+    ) -> Result<Response<Self::GetTransactionHistoryStream>, Status> {
+        println!("Received transaction history request: {:?}", request);
+
+        let (tx, rx): (Sender<Result<TransactionResponse, Status>>, Receiver<Result<TransactionResponse, Status>>) = mpsc::channel(4);
+
+        tokio::spawn(async move {
+            for i in 0..30 {
+                if tx
+                    .send(Ok(TransactionResponse {
+                        transaction_id: format!("trans_{}", i),
+                        status: "Completed".to_string(),
+                        amount: 100.0,
+                        timestamp: "2022-01-01T12:00:00Z".to_string(),
+                    }))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+
+                if i % 10 == 9 {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                }
+            }
+        });
+
+        Ok(Response::new(ReceiverStream::new(rx)))
+    }
+}
+
+
+
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut client = PaymentServiceClient::connect("http://[::1]:50051").await?;
-    let request = tonic::Request::new(PaymentRequest {
-        user_id: "user_123".to_string(),
-        amount: 100.0,
-    });
+pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let addr = "[::1]:50051".parse()?;
+    let payment_service = MyPaymentService::default();
+    let transaction_service = MyTransactionService::default();
 
-    let response = client.process_payment(request).await?;
-    println!("RESPONSE={:?}", response.into_inner());
+
+    Server::builder()
+        .add_service(PaymentServiceServer::new(payment_service))
+        .add_service(TransactionServiceServer::new(transaction_service))
+        .serve(addr)
+        .await?;
 
     Ok(())
 }

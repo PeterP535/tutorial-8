@@ -2,14 +2,10 @@ use tonic::{transport::Server, Request, Response, Status};
 pub mod services {
     tonic::include_proto!("services");
 }
-use services::{
-    payment_service_server::{PaymentService, PaymentServiceServer},
-    transaction_service_server::{TransactionService, TransactionServiceServer},
-    chat_service_server::{ChatService, ChatServiceServer},
-    PaymentRequest, PaymentResponse,
-    TransactionRequest, TransactionResponse,
-    ChatMessage, ChatResponse,
-};
+
+
+use services::{payment_service_client::PaymentServiceClient, PaymentRequest,
+               transaction_service_client::TransactionServiceClient, TransactionRequest};
 
 
 #[derive(Default)]
@@ -30,18 +26,25 @@ impl PaymentService for MyPaymentService {
 
 
 #[tokio::main]
-pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let addr = "[::1]:50051".parse()?;
-    let payment_service = MyPaymentService::default();
-    let transaction_service = MyTransactionService::default();
-    let chat_service = MyChatService::default();
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut client = PaymentServiceClient::connect("http://[::1]:50051").await?;
+    let request = tonic::Request::new(PaymentRequest {
+        user_id: "user_123".to_string(),
+        amount: 100.0,
+    });
 
-    Server::builder()
-        .add_service(PaymentServiceServer::new(payment_service))
-        .serve(addr)
-        .await?;
+    let response = client.process_payment(request).await?;
+    println!("RESPONSE={:?}", response.into_inner());
+
+    let mut transaction_client = TransactionServiceClient::connect("http://[::1]:50051").await?;
+    let request = tonic::Request::new(TransactionRequest {
+        user_id: "user_123".to_string(),
+    });
+
+    let mut stream = transaction_client.get_transaction_history(request).await?.into_inner();
+    while let Some(transaction) = stream.message().await? {
+        println!("Transaction: {:?}", transaction);
+    }
 
     Ok(())
-
-
 }
