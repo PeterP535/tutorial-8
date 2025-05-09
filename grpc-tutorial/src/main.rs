@@ -1,3 +1,2 @@
-fn main() {
-    println!("Hello, world!");
-}
+pub mod grpc_client;
+pub mod grpc_server;
